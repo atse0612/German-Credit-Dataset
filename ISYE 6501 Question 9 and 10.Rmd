@@ -1,0 +1,343 @@
+---
+output:
+  html_document: default
+  word_document: default
+---
+# ISYE 6501 Questions 9 and 10
+
+# Loading the Libraries
+```{r, message=FALSE}
+library(tidyverse)
+library(tree)
+library(rpart)
+library(randomForest)
+library(gtools)
+library(gmodels)
+library(pscl)
+library(ROCR)
+```
+
+# Question 9.1
+
+## Reading the Dataset
+```{r}
+uscrime <- read.table("uscrime.txt", stringsAsFactors = FALSE, header = TRUE)
+head(uscrime)
+uscrime_mu <- colMeans(uscrime[,-16]) # to acquire the mean
+uscrime_mu
+uscrime_std <- apply(uscrime[,-16], 2, sd) # to acquire the standard deviation
+uscrime_std
+```
+
+## Computing Eigenvalues/Eigenvectors
+
+```{r}
+mx_us_crime <- as.matrix(uscrime)
+US_XTX <- t(mx_us_crime)%*%mx_us_crime # Transpose
+uscrime_eig <- eigen(US_XTX)
+uscrime_eig$vectors
+
+for (e in 1:ncol(uscrime)){
+  print(det(US_XTX - uscrime_eig$values[e]*diag(ncol(uscrime)))%*%uscrime_eig$vectors[,e])
+}
+```
+
+By doing the computations for the eigenvalues and eigenvectors, there are sixteen eigenvector columns in the matrix. After running the loop functions, the values in the eigenvalues are much closer to zero and lower than one. 
+
+## Setting the Seed
+
+```{r}
+set.seed(2018)
+```
+
+## Running the Principal Component Analysis
+
+```{r}
+crime_pca <-prcomp(~M+So+Ed+Po1+Po2+LF+M.F+Pop+NW+U1+U2+Wealth+Ineq+Prob+Time,uscrime, scale=TRUE)
+summary(crime_pca)
+crime_pca$x
+```
+
+
+By utilizing the Principal Component Analysis for all the variables, it was determined that the first element on the data that is given shows the highest standard deviation. However, the cumulative proportion gives a higher number when it goes down through further components. 
+
+
+## Creating the Screeplot
+```{r}
+screeplot(crime_pca, type="lines", main = "Crime in PCA")
+```
+
+By looking at this plot, 3 is the most optimal clusters to use on the PCA.
+
+
+## Biplot
+```{r}
+biplot(crime_pca, main = "Components of PCA")
+```
+
+The biplot shows a much more consistent set of components of the factors that determines the rank in the PCA in comparison to the above plot. 
+
+## Concentrating on the First Four Components
+
+```{r}
+crime_four <-lm(uscrime[,16]~crime_pca$x[,1]+crime_pca$x[,2]+crime_pca$x[,3]+crime_pca$x[,4], uscrime)
+summary(crime_four)
+```
+
+By looking at the first four components in the Principal Component Analysis for the regression model, the r-squared value comes out to 0.3091, which is a fairly poor model with less variance. However, p-value is within the standards at < 5% threshold.
+
+## Rerunning the Original Components
+
+```{r}
+uscrime_origin <- c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+names(uscrime_origin) <-c("M", "So", "Ed", "Po1", "Po2", "LF", "M.F", "Pop","NW", "U1", "U2", "Wealth", "Ineq", "Prob", "Time")
+```
+
+## Looking at the Original Components through the Loop
+
+```{r}
+for (p in 4) {
+  for (name in names(uscrime_origin)) {
+    altogether <- crime_four$coefficients[p+1] * crime_pca$rotation[,p][[name]] 
+    uscrime_origin[[name]] <- uscrime_origin[[name]] + altogether
+  }
+}
+
+uscrime_origin
+```
+
+
+## Scaling the Original Components
+```{r}
+(crime_zero <- coef(crime_four)[1])
+(crime_s <- crime_pca$rotation[,1:4] %*% as.matrix(coef(crime_four)[-1]))
+```
+
+By looking at the scaled version of the crime counts, it is totaled to 905.08.Let's delve to further analysis.
+
+
+## Unscaling the Originals
+
+```{r}
+total <- 0
+unscale_crime <- rep(0,15)
+for(p in 1:15){
+  total <- total + crime_s[p]*uscrime_mu[p]/uscrime_std[p]
+  unscale_crime[p] <- crime_s[1]/uscrime_std[p] 
+}
+(crime_zero_origin <- crime_zero - total)
+crime_zero_origin
+```
+
+By scaling back the model to the originals, it has been determined that it comes out to 1648.5 crimes. However, given that the data is binary, PCA does not work too well to determine its factors.
+
+# Question 10.1
+
+## Reading the Dataset
+
+```{r}
+crime_tree <- read.table("uscrime.txt", stringsAsFactors = FALSE, header = TRUE)
+head(crime_tree)
+```
+
+
+## Changing a Different Seed
+```{r}
+set.seed(510)
+```
+
+## Building the Regression Tree Model
+
+```{r}
+crime_regression <- tree(Crime~
+  M+So+Ed+Po1+Po2+LF+M.F+Pop+NW+U1+U2+Wealth+Ineq+Prob+Time,crime_tree)
+summary(crime_regression)
+plot(crime_regression, main = "Regression Tree for Crime")
+text(crime_regression)
+```
+
+## Calculate Regression Tree Model's R-Square
+
+```{r}
+crime_yhat <- predict(crime_regression)
+crime_SSres <- sum((crime_yhat - crime_tree$Crime)^2)
+crime_SStot <- sum((crime_tree$Crime - mean(crime_tree$Crime))^2)
+crime_R2 <- 1 - crime_SSres/crime_SStot
+crime_R2
+```
+
+By computing the R-square for the Regression tree model, it comes out to 0.724, which is a fairly good model to use. Although, let's move on and compute the random forest model. 
+
+## Building the Random Forest Model
+
+```{r}
+crime_forest <- randomForest(Crime~
+  M+So+Ed+Po1+Po2+LF+M.F+Pop+NW+U1+U2+Wealth+Ineq+Prob+Time,crime_tree)
+summary(crime_forest)
+plot(crime_forest, main = "Random Forest for Crime")
+crime_forest$ntree
+crime_forest$importance
+```
+
+
+## Calculate Random Forest R-Squared
+
+```{r}
+rf_yhat <- predict(crime_forest)
+rf_SSres <- sum((rf_yhat - crime_tree$Crime)^2)
+rf_SStot <- sum((crime_tree$Crime - mean(crime_tree$Crime))^2)
+rf_R2 <- 1 - rf_SSres/rf_SStot
+rf_R2
+```
+
+
+By comparing the random forest and regression tree models, there are much more impurities in the random forest analysis. In addition, the random forest has computed to 500 different trees in the model. By calculating the R-squared for the random forest model, it comes out to 0.41, which is a fairly poor model than the regression tree.
+
+
+# Question 10.2
+
+**Describe a situation or problem from your job, everyday life, current events, etc., for which a logistic regression model would be appropriate. List some (up to 5) predictors that you might use. **
+
+I have heard that logistic regression can be used in many industries. Examples include:
+
+- Getting approved for a loan, who will pay the mortgage off in time vs. who will default
+- Voting outcomes: who will vote vs. who will not vote
+- Willing to pay: who will buy for a specific item vs. who will not buy for that specific item
+
+
+# Question 10.3
+
+## Reading the Dataset for the German Credit
+
+```{r}
+gce <- read.table("germancredit.txt", stringsAsFactors = FALSE, header = FALSE)
+head(gce)
+```
+
+
+## Selecting the Random Seed
+
+```{r}
+set.seed(818)
+```
+
+## Logistic Regression Conversion
+
+```{r}
+gce$V21 <- as.integer(as.logical(gce$V21 < 2))
+```
+
+## Creating the Logistic Regression Model
+
+```{r}
+gce_log <- glm(V21 ~., family = binomial(link = "logit"), gce)
+summary(gce_log)
+```
+
+By looking at the summary of the Logistic Regression model, there are five or six variables that are significant. What it shows is that there is a strong correlation between those variables as well. Let's delve deeper to the different percentage of the models.
+
+## Cocentrating at the p-values < 0.05 Level
+
+```{r}
+gce0.05_log<- glm(V21~V1+V2+V3+V4+V5+V6+V8+V9+V10+V14+V20, family=binomial(link="logit"), gce)
+summary(gce0.05_log)
+```
+
+## Concentrating at the p-values at 0.1 Level
+
+```{r}
+gce0.1_log<- glm(V21~V1+V2+V3+V4+V5+V6+V8+V9+V10+V14+V20, family=binomial(link="logit"), gce)
+summary(gce0.1_log)
+```
+
+By looking at the 0.05 and 0.1 levels for the p-values in the models, it has shown that the AIC at 984.95 is a slight decrease from the original at 993.82. The importance of the results have seem that there isn't much change at all just by using the results from deviance at all. Let's continue further with the analysis.
+
+## Looking for the R-Square in the Model
+```{r}
+pR2(gce_log)
+pR2(gce0.05_log)
+pR2(gce0.1_log)
+```
+For looking at the r-squared models, it has performed poorly for all three of them at 0.39. This has said that r-squared isn't the necessary best predictor.
+
+## Coefficients of the Model
+```{r}
+coef(gce0.05_log)
+
+sum(gce[,21])
+```
+
+## Comparing the Data by Using Half for Training and Testing
+
+```{r}
+indexes = sample(1:nrow(gce), size=0.5*nrow(gce)) 
+gce_train <- gce[indexes,] # Training Data
+gce_test <- gce[-indexes,] # Testing Data
+```
+
+## Using Logistic Regression on the Training Data
+
+```{r}
+gce_train_half <- glm(V21 ~ ., family=binomial(link="logit"), data = gce_train)
+summary(gce_train_half)
+```
+
+## Model 1 and Looking at the 0.1 p-value
+
+```{r}
+gce_train_half_one <- glm(V21 ~ V1+V2+V3+V4+V6+V8+V10+V12+V14+V16, family=binomial(link="logit"), data = gce_train)
+summary(gce_train_half_one)
+```
+
+
+After looking at the first model, there are three significant factors on the equation, which are V1A14, V2, and V4A41.
+
+## Model 2 at the 0.1 p-value
+
+```{r}
+gce_train_half_two <- glm(V21 ~ V1+V2+V3+V4+V6+V10+V14+V16, family=binomial(link="logit"), data = gce_train)
+summary(gce_train_half_two)
+pR2(gce_train_half_two)
+```
+
+
+## Using a Different Threshold at 50%
+
+```{r}
+gce_fit <- fitted.values(gce_train_half_two)
+tf <- rep(0,500) 
+
+for (j in 1:500){
+  if(gce_fit[j] >= 0.5) tf[j] <- 1
+}
+
+CrossTable(gce_train$V21, tf, digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=F, data=gce_train)
+```
+
+## Total Cost
+```{r}
+gce_tc50 <- 76* 5 + 33 * 1 
+gce_tc50
+```
+
+## Another Threshold Scenario, Concentrating on 70%
+
+```{r}
+gce_fit <- fitted.values(gce_train_half_two)
+tf <- rep(0,500) 
+
+for (j in 1:500){
+  if(gce_fit[j] >= 0.7) tf[j] <- 1
+}
+
+CrossTable(gce_train$V21, tf, digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=F, data=gce_train)
+```
+
+## Total Cost Part 2
+
+```{r}
+gce_tc70 <- 37* 5 + 96 * 1 
+gce_tc70
+```
+
+By doing the analyses for the different thresholds on the datasets between the 50-70% thresholds, it has been determined that the 50% threshold has a higher total cost than the 70% threshold by looking at the tables that are given. When the 50% threshold was used, it seems that there are more people woulkd be accepted for credit at 83% vs. at 70% where it was at 56%. 
